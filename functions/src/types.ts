@@ -4,6 +4,7 @@ export interface ShelterAnimalItem {
   happenDt?: string;
   happenPlace?: string;
   kindCd?: string;
+  upKindCd?: string;
   colorCd?: string;
   age?: string;
   weight?: string;

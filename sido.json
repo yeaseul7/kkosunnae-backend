@@ -1,0 +1,388 @@
+{
+  "ok": true,
+  "source": "animalShelterSrvc_v2",
+  "generatedAt": "2026-04-21T06:33:33.109Z",
+  "sidoCount": 10,
+  "mappings": [
+      {
+          "sido": {
+              "orgCd": "6110000",
+              "orgdownNm": "서울특별시"
+          },
+          "sigungu": [
+              {
+                  "orgCd": "6119999",
+                  "orgdownNm": "가정보호"
+              },
+              {
+                  "orgCd": "3220000",
+                  "orgdownNm": "강남구"
+              },
+              {
+                  "orgCd": "3240000",
+                  "orgdownNm": "강동구"
+              },
+              {
+                  "orgCd": "3080000",
+                  "orgdownNm": "강북구"
+              },
+              {
+                  "orgCd": "3150000",
+                  "orgdownNm": "강서구"
+              },
+              {
+                  "orgCd": "3200000",
+                  "orgdownNm": "관악구"
+              },
+              {
+                  "orgCd": "3040000",
+                  "orgdownNm": "광진구"
+              },
+              {
+                  "orgCd": "3160000",
+                  "orgdownNm": "구로구"
+              },
+              {
+                  "orgCd": "3170000",
+                  "orgdownNm": "금천구"
+              },
+              {
+                  "orgCd": "3100000",
+                  "orgdownNm": "노원구"
+              }
+          ]
+      },
+      {
+          "sido": {
+              "orgCd": "6260000",
+              "orgdownNm": "부산광역시"
+          },
+          "sigungu": [
+              {
+                  "orgCd": "3360000",
+                  "orgdownNm": "강서구"
+              },
+              {
+                  "orgCd": "3350000",
+                  "orgdownNm": "금정구"
+              },
+              {
+                  "orgCd": "3400000",
+                  "orgdownNm": "기장군"
+              },
+              {
+                  "orgCd": "3310000",
+                  "orgdownNm": "남구"
+              },
+              {
+                  "orgCd": "3270000",
+                  "orgdownNm": "동구"
+              },
+              {
+                  "orgCd": "3300000",
+                  "orgdownNm": "동래구"
+              },
+              {
+                  "orgCd": "3290000",
+                  "orgdownNm": "부산진구"
+              },
+              {
+                  "orgCd": "3320000",
+                  "orgdownNm": "북구"
+              },
+              {
+                  "orgCd": "3390000",
+                  "orgdownNm": "사상구"
+              },
+              {
+                  "orgCd": "3340000",
+                  "orgdownNm": "사하구"
+              }
+          ]
+      },
+      {
+          "sido": {
+              "orgCd": "6270000",
+              "orgdownNm": "대구광역시"
+          },
+          "sigungu": [
+              {
+                  "orgCd": "5141000",
+                  "orgdownNm": "군위군"
+              },
+              {
+                  "orgCd": "3440000",
+                  "orgdownNm": "남구"
+              },
+              {
+                  "orgCd": "3470000",
+                  "orgdownNm": "달서구"
+              },
+              {
+                  "orgCd": "3480000",
+                  "orgdownNm": "달성군"
+              },
+              {
+                  "orgCd": "3420000",
+                  "orgdownNm": "동구"
+              },
+              {
+                  "orgCd": "3450000",
+                  "orgdownNm": "북구"
+              },
+              {
+                  "orgCd": "3430000",
+                  "orgdownNm": "서구"
+              },
+              {
+                  "orgCd": "3460000",
+                  "orgdownNm": "수성구"
+              },
+              {
+                  "orgCd": "3410000",
+                  "orgdownNm": "중구"
+              }
+          ]
+      },
+      {
+          "sido": {
+              "orgCd": "6280000",
+              "orgdownNm": "인천광역시"
+          },
+          "sigungu": [
+              {
+                  "orgCd": "3570000",
+                  "orgdownNm": "강화군"
+              },
+              {
+                  "orgCd": "3550000",
+                  "orgdownNm": "계양구"
+              },
+              {
+                  "orgCd": "3530000",
+                  "orgdownNm": "남동구"
+              },
+              {
+                  "orgCd": "3500000",
+                  "orgdownNm": "동구"
+              },
+              {
+                  "orgCd": "3510500",
+                  "orgdownNm": "미추홀구"
+              },
+              {
+                  "orgCd": "3540000",
+                  "orgdownNm": "부평구"
+              },
+              {
+                  "orgCd": "3560000",
+                  "orgdownNm": "서구"
+              },
+              {
+                  "orgCd": "3520000",
+                  "orgdownNm": "연수구"
+              },
+              {
+                  "orgCd": "3580000",
+                  "orgdownNm": "옹진군"
+              },
+              {
+                  "orgCd": "3490000",
+                  "orgdownNm": "중구"
+              }
+          ]
+      },
+      {
+          "sido": {
+              "orgCd": "6290000",
+              "orgdownNm": "광주광역시"
+          },
+          "sigungu": [
+              {
+                  "orgCd": "3630000",
+                  "orgdownNm": "광산구"
+              },
+              {
+                  "orgCd": "6299998",
+                  "orgdownNm": "광주광역시"
+              },
+              {
+                  "orgCd": "3610000",
+                  "orgdownNm": "남구"
+              },
+              {
+                  "orgCd": "3590000",
+                  "orgdownNm": "동구"
+              },
+              {
+                  "orgCd": "3620000",
+                  "orgdownNm": "북구"
+              },
+              {
+                  "orgCd": "3600000",
+                  "orgdownNm": "서구"
+              }
+          ]
+      },
+      {
+          "sido": {
+              "orgCd": "5690000",
+              "orgdownNm": "세종특별자치시"
+          },
+          "sigungu": [
+          ]
+      },
+      {
+          "sido": {
+              "orgCd": "6300000",
+              "orgdownNm": "대전광역시"
+          },
+          "sigungu": [
+              {
+                  "orgCd": "3680000",
+                  "orgdownNm": "대덕구"
+              },
+              {
+                  "orgCd": "3640000",
+                  "orgdownNm": "동구"
+              },
+              {
+                  "orgCd": "3660000",
+                  "orgdownNm": "서구"
+              },
+              {
+                  "orgCd": "3670000",
+                  "orgdownNm": "유성구"
+              },
+              {
+                  "orgCd": "3650000",
+                  "orgdownNm": "중구"
+              }
+          ]
+      },
+      {
+          "sido": {
+              "orgCd": "6310000",
+              "orgdownNm": "울산광역시"
+          },
+          "sigungu": [
+              {
+                  "orgCd": "3700000",
+                  "orgdownNm": "남구"
+              },
+              {
+                  "orgCd": "3710000",
+                  "orgdownNm": "동구"
+              },
+              {
+                  "orgCd": "3720000",
+                  "orgdownNm": "북구"
+              },
+              {
+                  "orgCd": "3730000",
+                  "orgdownNm": "울주군"
+              },
+              {
+                  "orgCd": "3690000",
+                  "orgdownNm": "중구"
+              }
+          ]
+      },
+      {
+          "sido": {
+              "orgCd": "6410000",
+              "orgdownNm": "경기도"
+          },
+          "sigungu": [
+              {
+                  "orgCd": "4160000",
+                  "orgdownNm": "가평군"
+              },
+              {
+                  "orgCd": "6419998",
+                  "orgdownNm": "경기도"
+              },
+              {
+                  "orgCd": "3940000",
+                  "orgdownNm": "고양시"
+              },
+              {
+                  "orgCd": "3970000",
+                  "orgdownNm": "과천시"
+              },
+              {
+                  "orgCd": "3900000",
+                  "orgdownNm": "광명시"
+              },
+              {
+                  "orgCd": "5540000",
+                  "orgdownNm": "광주시"
+              },
+              {
+                  "orgCd": "3980000",
+                  "orgdownNm": "구리시"
+              },
+              {
+                  "orgCd": "4020000",
+                  "orgdownNm": "군포시"
+              },
+              {
+                  "orgCd": "5630000",
+                  "orgdownNm": "기흥구"
+              },
+              {
+                  "orgCd": "4090000",
+                  "orgdownNm": "김포시"
+              }
+          ]
+      },
+      {
+          "sido": {
+              "orgCd": "6530000",
+              "orgdownNm": "강원특별자치도"
+          },
+          "sigungu": [
+              {
+                  "orgCd": "4201000",
+                  "orgdownNm": "강릉시"
+              },
+              {
+                  "orgCd": "4341000",
+                  "orgdownNm": "고성군"
+              },
+              {
+                  "orgCd": "4211000",
+                  "orgdownNm": "동해시"
+              },
+              {
+                  "orgCd": "4241000",
+                  "orgdownNm": "삼척시"
+              },
+              {
+                  "orgCd": "4231000",
+                  "orgdownNm": "속초시"
+              },
+              {
+                  "orgCd": "4321000",
+                  "orgdownNm": "양구군"
+              },
+              {
+                  "orgCd": "4351000",
+                  "orgdownNm": "양양군"
+              },
+              {
+                  "orgCd": "4271000",
+                  "orgdownNm": "영월군"
+              },
+              {
+                  "orgCd": "4191000",
+                  "orgdownNm": "원주시"
+              },
+              {
+                  "orgCd": "4331000",
+                  "orgdownNm": "인제군"
+              }
+          ]
+      }
+  ]
+}

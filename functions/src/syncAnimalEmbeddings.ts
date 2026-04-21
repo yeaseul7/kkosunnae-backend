@@ -3,19 +3,35 @@ import {defineSecret} from "firebase-functions/params";
 import {onSchedule} from "firebase-functions/scheduler";
 import {Pinecone} from "@pinecone-database/pinecone";
 import {pipeline} from "@huggingface/transformers";
-import {AbandonmentApiResponse, ShelterAnimalItem} from "./types.js";
+import {
+  fetchAbandonmentApiPage,
+  mergeShelterAnimalsIntoFirestore,
+  normalizeHappenYyyyMmDd,
+  parseShelterItemList,
+  SHELTER_ANIMALS_COLLECTION,
+  SHELTER_API_PAGE_SIZE,
+  todayYyyyMmDdSeoul,
+} from "./shelterAnimalFirestoreWrite.js";
+import {ShelterAnimalItem} from "./types.js";
 
-const API_BASE_URL =
-  "https://apis.data.go.kr/1543061/abandonmentPublicService_v2";
 const ANIMALS_OPENAPI_SECRET = defineSecret("ANIMALS_OPENAPI_KEY");
 const PINECONE_API_SECRET = defineSecret("PINECONE_API_KEY");
 /** Pinecone 인덱스 dimension: 384 (DINOv2-small) */
 const PINECONE_INDEX_NAME = "embeded-animal";
-const TARGET_SAVE_COUNT = 100;
-const ROWS_PER_PAGE = 100;
-const FETCH_IDS_BATCH_SIZE = 100;
 const UPSERT_BATCH_SIZE = 100;
+/** 청크 단위: 한 번에 벡터화할 개수 (공공 API·메모리 부담 완화) */
+const CHUNK_SIZE = 30;
+/** 청크 간 휴식 시간(ms). 공공기관 서버·메모리 안정용 */
+const DELAY_BETWEEN_CHUNKS_MS = 1500;
 const IMAGE_MODEL_ID = "Xenova/dinov2-small";
+
+/**
+ * @param {number} ms 대기 시간(ms)
+ * @return {Promise<void>} ms 후 resolve
+ */
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 /**
  * 공공데이터 API에서 popfile(첫 번째 이미지) URL만 추출
@@ -33,8 +49,8 @@ function getPopfileUrl(item: ShelterAnimalItem): string | null {
 /** image-feature-extraction 파이프라인 타입 (pooler 없음 → dims로 CLS 추출) */
 type FeatureExtractor = (
   url: string,
-  opts?: { pool?: boolean }
-) => Promise<{ data: Float32Array; dims?: number[] }>;
+  opts?: {pool?: boolean}
+) => Promise<{data: Float32Array; dims?: number[]}>;
 
 /**
  * DINOv2는 pooler 없음 → pool: false 후 CLS(첫 토큰) 추출, L2 정규화로 코사인 유사도 최적화
@@ -65,36 +81,8 @@ async function getImageEmbedding(
 }
 
 /**
- * 공공데이터 API에서 한 페이지 조회
- * @param {string} serviceKey 공공데이터 API 인증키
- * @param {number} pageNo 페이지 번호
- * @param {number} numOfRows 페이지당 행 수
- */
-async function fetchAbandonmentApiPage(
-  serviceKey: string,
-  pageNo: number,
-  numOfRows: number = ROWS_PER_PAGE
-): Promise<AbandonmentApiResponse> {
-  const params = new URLSearchParams({
-    serviceKey,
-    pageNo: String(pageNo),
-    numOfRows: String(numOfRows),
-    _type: "json",
-  });
-
-  const url = `${API_BASE_URL}/abandonmentPublic_v2?${params.toString()}`;
-  const response = await fetch(url);
-
-  if (!response.ok) {
-    throw new Error(`API 오류: ${response.status} ${await response.text()}`);
-  }
-
-  return response.json() as Promise<AbandonmentApiResponse>;
-}
-
-/**
- * 메인 동기화: 공공데이터 조회 → id 존재 시 스킵 → popfile 벡터화 → Pinecone 저장
- * (최대 TARGET_SAVE_COUNT개)
+ * 메인 동기화: 공공데이터 1페이지(500건) 조회 → happenDt 오늘분 Firestore merge 저장
+ * → popfile 있는 항목만 이미지 벡터화 후 Pinecone upsert
  * @param {string} serviceKey 공공데이터 API 인증키
  * @param {string} pineconeApiKey Pinecone API 키
  */
@@ -105,120 +93,110 @@ async function runSync(
   const pc = new Pinecone({apiKey: pineconeApiKey});
   const index = pc.index(PINECONE_INDEX_NAME);
 
-  logger.info("이미지 임베딩 모델 로딩 중...");
+  const todayYmd = todayYyyyMmDdSeoul();
+  const data = await fetchAbandonmentApiPage(
+    serviceKey,
+    1,
+    SHELTER_API_PAGE_SIZE
+  );
+  const {itemList, totalCount} = parseShelterItemList(data);
+
+  const firestoreWritten = await mergeShelterAnimalsIntoFirestore(
+    itemList,
+    todayYmd
+  );
+  logger.info(
+    `Firestore 저장 완료: 유기일 ${todayYmd} 대상 ${firestoreWritten}건 ` +
+      `(컬렉션: ${SHELTER_ANIMALS_COLLECTION})`
+  );
+
+  logger.info(
+    "이미지 임베딩 모델 로딩 중… " +
+      `(대상 유기일 happenDt = ${todayYmd}, 1페이지 ${SHELTER_API_PAGE_SIZE}건)`
+  );
   const pipe = await pipeline("image-feature-extraction", IMAGE_MODEL_ID);
   const extractor = pipe as unknown as FeatureExtractor;
 
-  let pageNo = 1;
-  let totalCount = 0;
-  let processed = 0;
-  let skipped = 0;
+  type Candidate =
+    { docId: string; item: ShelterAnimalItem; imageUrl: string };
+  const candidates: Candidate[] = [];
+  for (const item of itemList) {
+    if (normalizeHappenYyyyMmDd(item.happenDt) !== todayYmd) continue;
+    const desertionNo = item.desertionNo;
+    const careRegNo = item.careRegNo ?? "";
+    if (!desertionNo || !careRegNo) continue;
+    const docId = `${desertionNo}-${careRegNo}`;
+    const imageUrl = getPopfileUrl(item);
+    if (!imageUrl) continue;
+    candidates.push({docId, item, imageUrl});
+  }
+
+  const toEmbed = candidates;
   let embedded = 0;
+  let embedFailed = 0;
 
-  do {
-    const data = await fetchAbandonmentApiPage(serviceKey, pageNo);
-    const body = data?.response?.body;
-    const items = body?.items?.item;
+  const recordsToUpsert: Array<{
+    id: string;
+    values: number[];
+    metadata: {
+      desertionNo: string;
+      careRegNo: string;
+      imageUrl: string;
+      upKindCd: string;
+      orgNm: string;
+    };
+  }> = [];
 
-    if (!body?.totalCount) {
-      totalCount = 0;
-      break;
-    }
-    totalCount = body.totalCount;
+  for (let i = 0; i < toEmbed.length; i += CHUNK_SIZE) {
+    const chunk = toEmbed.slice(i, i + CHUNK_SIZE);
+    const chunkResults = await Promise.all(
+      chunk.map(async ({docId, item, imageUrl}) => {
+        const embedding = await getImageEmbedding(extractor, imageUrl);
+        if (!embedding) return null;
+        return {
+          id: docId,
+          values: embedding,
+          metadata: {
+            desertionNo: String(item.desertionNo ?? ""),
+            careRegNo: String(item.careRegNo ?? ""),
+            imageUrl,
+            upKindCd: String(item.upKindCd ?? ""),
+            orgNm: String(item.orgNm ?? ""),
+          },
+        };
+      })
+    );
 
-    const itemList: ShelterAnimalItem[] = Array.isArray(items) ?
-      items :
-      items ?
-        [items] :
-        [];
-
-    type Candidate =
-      { docId: string; item: ShelterAnimalItem; imageUrl: string };
-    const candidates: Candidate[] = [];
-    for (const item of itemList) {
-      const desertionNo = item.desertionNo;
-      const careRegNo = item.careRegNo ?? "";
-      if (!desertionNo || !careRegNo) continue;
-      const docId = `${desertionNo}-${careRegNo}`;
-      const imageUrl = getPopfileUrl(item);
-      if (!imageUrl) continue;
-      candidates.push({docId, item, imageUrl});
-    }
-
-    if (candidates.length === 0) {
-      pageNo++;
-      continue;
-    }
-
-    const existingIds = new Set<string>();
-    for (let i = 0; i < candidates.length; i += FETCH_IDS_BATCH_SIZE) {
-      const batch = candidates
-        .slice(i, i + FETCH_IDS_BATCH_SIZE)
-        .map((c) => c.docId);
-      const result = await index.fetch({ids: batch});
-      if (result?.records) {
-        for (const id of Object.keys(result.records)) {
-          existingIds.add(id);
-        }
-      }
-    }
-
-    const recordsToUpsert: Array<{
-      id: string;
-      values: number[];
-      metadata: { desertionNo: string; careRegNo: string; imageUrl: string };
-    }> = [];
-
-    for (const {docId, item, imageUrl} of candidates) {
-      if (embedded >= TARGET_SAVE_COUNT) break;
-
-      processed++;
-      if (existingIds.has(docId)) {
-        skipped++;
+    for (const rec of chunkResults) {
+      if (!rec) {
+        embedFailed++;
         continue;
       }
-
-      const embedding = await getImageEmbedding(extractor, imageUrl);
-      if (!embedding) continue;
-
-      recordsToUpsert.push({
-        id: docId,
-        values: embedding,
-        metadata: {
-          desertionNo: String(item.desertionNo ?? ""),
-          careRegNo: String(item.careRegNo ?? ""),
-          imageUrl,
-        },
-      });
-
-      if (recordsToUpsert.length >= UPSERT_BATCH_SIZE) {
-        await index.upsert({records: recordsToUpsert});
-        embedded += recordsToUpsert.length;
-        logger.info(
-          `배치 저장: ${recordsToUpsert.length}건 ` +
-          `(${embedded}/${TARGET_SAVE_COUNT})`
-        );
-        recordsToUpsert.length = 0;
-      }
+      recordsToUpsert.push(rec);
+      embedded++;
     }
 
-    if (recordsToUpsert.length > 0) {
+    if (recordsToUpsert.length >= UPSERT_BATCH_SIZE) {
       await index.upsert({records: recordsToUpsert});
-      embedded += recordsToUpsert.length;
-      logger.info(
-        `배치 저장: ${recordsToUpsert.length}건 (${embedded}/${TARGET_SAVE_COUNT})`
-      );
+      logger.info(`배치 저장: ${recordsToUpsert.length}건 (누적 임베딩 성공 ${embedded}건)`);
+      recordsToUpsert.length = 0;
     }
 
-    if (embedded >= TARGET_SAVE_COUNT) {
-      break;
+    if (i + CHUNK_SIZE < toEmbed.length) {
+      await delay(DELAY_BETWEEN_CHUNKS_MS);
     }
-    pageNo++;
-  } while (pageNo <= Math.ceil(totalCount / ROWS_PER_PAGE));
+  }
+
+  if (recordsToUpsert.length > 0) {
+    await index.upsert({records: recordsToUpsert});
+    logger.info(`배치 저장: ${recordsToUpsert.length}건 (누적 임베딩 성공 ${embedded}건)`);
+  }
 
   logger.info(
-    `동기화 완료: 전체 ${totalCount}건, 처리 ${processed}건, ` +
-    `기존 스킵 ${skipped}건, 신규 저장 ${embedded}건 (목표 ${TARGET_SAVE_COUNT}건)`
+    `동기화 완료: API totalCount ${totalCount}건, 1페이지 응답 ${itemList.length}건, ` +
+    `Firestore(오늘) ${firestoreWritten}건, ` +
+    `유기일 ${todayYmd}·이미지 있음 후보 ${candidates.length}건, ` +
+    `Pinecone 임베딩 성공 ${embedded}건, 이미지 실패 ${embedFailed}건`
   );
 }
 
