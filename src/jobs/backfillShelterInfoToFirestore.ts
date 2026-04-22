@@ -1,12 +1,8 @@
 import {getApps, initializeApp} from "firebase-admin/app";
 import {FieldValue, getFirestore} from "firebase-admin/firestore";
-import * as logger from "firebase-functions/logger";
-import {defineSecret} from "firebase-functions/params";
-import {onSchedule} from "firebase-functions/v2/scheduler";
 
 const SHELTERS_API_BASE_URL =
   "https://apis.data.go.kr/1543061/animalShelterSrvc_v2";
-const SHELTERS_OPENAPI_SECRET = defineSecret("ANIMALS_OPENAPI_KEY");
 const SHELTER_INFO_COLLECTION = "shelter-info";
 const SHELTER_INFO_NUM_OF_ROWS = 500;
 const SHELTER_INFO_MAX_PAGES = 20;
@@ -29,6 +25,14 @@ type ShelterInfoApiResponse = {
     };
   };
 };
+
+export interface BackfillShelterInfoResult {
+  ok: true;
+  pagesFetched: number;
+  firestoreDocWrites: number;
+  rowsPerPage: number;
+  firestoreCollection: string;
+}
 
 /**
  * @param {number} ms 대기 시간(ms)
@@ -143,64 +147,55 @@ async function mergeShelterInfoIntoFirestore(
     written += newRows.length;
   }
   if (skippedExisting > 0) {
-    logger.info(`기존 보호소 스킵: ${skippedExisting}건`);
+    console.info(`기존 보호소 스킵: ${skippedExisting}건`);
   }
   return written;
 }
 
 /**
- * 스케줄 실행: shelterInfo_v2 전체(최대 20페이지 x 500건) 조회 후
- * Firestore shelter-info 컬렉션에 증분 저장
+ * shelterInfo_v2 전체를 조회 후 Firestore shelter-info 컬렉션에 증분 저장
+ * @param {string} serviceKey 공공데이터 API 키
+ * @return {Promise<BackfillShelterInfoResult>} 백필 결과
  */
-export const backfillShelterInfoToFirestore = onSchedule(
-  {
-    // 일요일 04:00 KST (토요일 19:00 UTC) - 주간 저트래픽 시간대 실행
-    schedule: "0 19 * * 6",
-    timeZone: "Asia/Seoul",
-    secrets: [SHELTERS_OPENAPI_SECRET],
-    memory: "1GiB",
-    timeoutSeconds: 540,
-  },
-  async () => {
-    const serviceKey = SHELTERS_OPENAPI_SECRET.value();
-    if (!serviceKey) {
-      logger.error("ANIMALS_OPENAPI_KEY missing");
-      return;
+export async function backfillShelterInfoToFirestore(
+  serviceKey: string
+): Promise<BackfillShelterInfoResult> {
+  let pagesFetched = 0;
+  let totalWritten = 0;
+
+  for (let pageNo = 1; pageNo <= SHELTER_INFO_MAX_PAGES; pageNo++) {
+    const data = await fetchShelterInfoPage(serviceKey, pageNo);
+    const items = parseItems(data);
+    const totalCount = data?.response?.body?.totalCount ?? 0;
+    const written = await mergeShelterInfoIntoFirestore(items);
+    pagesFetched = pageNo;
+    totalWritten += written;
+    console.info(
+      `보호소 백필 page ${pageNo}/${SHELTER_INFO_MAX_PAGES}: ` +
+        `응답 ${items.length}건, Firestore ${written}건 ` +
+        `(API totalCount ${totalCount})`
+    );
+    if (items.length === 0) {
+      console.info("보호소 백필 빈 페이지로 중단");
+      break;
     }
-
-    try {
-      let pagesFetched = 0;
-      let totalWritten = 0;
-      for (let pageNo = 1; pageNo <= SHELTER_INFO_MAX_PAGES; pageNo++) {
-        const data = await fetchShelterInfoPage(serviceKey, pageNo);
-        const items = parseItems(data);
-        const totalCount = data?.response?.body?.totalCount ?? 0;
-        const written = await mergeShelterInfoIntoFirestore(items);
-        pagesFetched = pageNo;
-        totalWritten += written;
-        logger.info(
-          `보호소 백필 page ${pageNo}/${SHELTER_INFO_MAX_PAGES}: ` +
-            `응답 ${items.length}건, Firestore ${written}건 ` +
-            `(API totalCount ${totalCount})`
-        );
-        if (items.length === 0) {
-          logger.info("보호소 백필 빈 페이지로 중단");
-          break;
-        }
-        if (pageNo < SHELTER_INFO_MAX_PAGES) {
-          await delay(BETWEEN_PAGES_MS);
-        }
-      }
-
-      logger.info(
-        `보호소 주간 백필 완료: pagesFetched ${pagesFetched}, ` +
-          `rowsPerPage ${SHELTER_INFO_NUM_OF_ROWS}, ` +
-          `firestoreCollection ${SHELTER_INFO_COLLECTION}, ` +
-          `firestoreDocWrites ${totalWritten}`
-      );
-    } catch (error) {
-      logger.error("보호소 Firestore 백필 실패:", error);
-      throw error;
+    if (pageNo < SHELTER_INFO_MAX_PAGES) {
+      await delay(BETWEEN_PAGES_MS);
     }
   }
-);
+
+  console.info(
+    `보호소 백필 완료: pagesFetched ${pagesFetched}, ` +
+      `rowsPerPage ${SHELTER_INFO_NUM_OF_ROWS}, ` +
+      `firestoreCollection ${SHELTER_INFO_COLLECTION}, ` +
+      `firestoreDocWrites ${totalWritten}`
+  );
+
+  return {
+    ok: true,
+    pagesFetched,
+    rowsPerPage: SHELTER_INFO_NUM_OF_ROWS,
+    firestoreCollection: SHELTER_INFO_COLLECTION,
+    firestoreDocWrites: totalWritten,
+  };
+}

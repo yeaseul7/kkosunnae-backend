@@ -10,11 +10,11 @@ RUN apt-get update \
     python3 \
   && rm -rf /var/lib/apt/lists/*
 
-COPY functions/package*.json ./
+COPY package*.json ./
 RUN npm ci
 
-COPY functions/tsconfig*.json ./
-COPY functions/src ./src
+COPY tsconfig*.json ./
+COPY src ./src
 
 RUN npm run build
 

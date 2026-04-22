@@ -1,14 +1,15 @@
 .git
 .gitignore
 Dockerfile
-firebase.json
 sido.json
 
-functions/lib
-functions/node_modules
-functions/.runtimeconfig.json
-functions/firebase-debug.log
-functions/npm-debug.log
+lib
+node_modules
+.runtimeconfig.json
+firebase-debug.log
+npm-debug.log
+
+functions
 
 **/.DS_Store
 **/*.log

@@ -8,3 +8,6 @@ typings/
 # Node.js dependency directory
 node_modules/
 *.local
+
+# Legacy build output from the old Firebase Functions package layout
+functions/

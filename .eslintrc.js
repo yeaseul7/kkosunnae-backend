@@ -25,6 +25,7 @@ module.exports = {
   },
   ignorePatterns: [
     "/lib/**/*", // Ignore built files.
+    "/functions/**/*", // Ignore legacy Firebase Functions layout.
     "/generated/**/*", // Ignore generated files.
   ],
   plugins: [
