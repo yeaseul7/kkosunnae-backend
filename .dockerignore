@@ -1,0 +1,14 @@
+.git
+.gitignore
+Dockerfile
+firebase.json
+sido.json
+
+functions/lib
+functions/node_modules
+functions/.runtimeconfig.json
+functions/firebase-debug.log
+functions/npm-debug.log
+
+**/.DS_Store
+**/*.log

@@ -12,10 +12,16 @@ import {
   SHELTER_API_PAGE_SIZE,
   todayYyyyMmDdSeoul,
 } from "./shelterAnimalFirestoreWrite.js";
+import {
+  CloudinaryUploadConfig,
+  parseCloudinaryUrl,
+  uploadImageUrlToCloudinary,
+} from "./cloudinaryImageUpload.js";
 import {ShelterAnimalItem} from "./types.js";
 
 const ANIMALS_OPENAPI_SECRET = defineSecret("ANIMALS_OPENAPI_KEY");
 const PINECONE_API_SECRET = defineSecret("PINECONE_API_KEY");
+const CLOUDINARY_URL_SECRET = defineSecret("CLOUDINARY_URL");
 /** Pinecone 인덱스 dimension: 384 (DINOv2-small) */
 const PINECONE_INDEX_NAME = "embeded-animal";
 const UPSERT_BATCH_SIZE = 100;
@@ -85,10 +91,13 @@ async function getImageEmbedding(
  * → popfile 있는 항목만 이미지 벡터화 후 Pinecone upsert
  * @param {string} serviceKey 공공데이터 API 인증키
  * @param {string} pineconeApiKey Pinecone API 키
+ * @param {CloudinaryUploadConfig | null | undefined} cloudinaryConfig
+ * Cloudinary 설정
  */
-async function runSync(
+export async function runSync(
   serviceKey: string,
-  pineconeApiKey: string
+  pineconeApiKey: string,
+  cloudinaryConfig?: CloudinaryUploadConfig | null
 ): Promise<void> {
   const pc = new Pinecone({apiKey: pineconeApiKey});
   const index = pc.index(PINECONE_INDEX_NAME);
@@ -134,6 +143,8 @@ async function runSync(
   const toEmbed = candidates;
   let embedded = 0;
   let embedFailed = 0;
+  let cloudinaryUploaded = 0;
+  let cloudinaryFailed = 0;
 
   const recordsToUpsert: Array<{
     id: string;
@@ -142,6 +153,8 @@ async function runSync(
       desertionNo: string;
       careRegNo: string;
       imageUrl: string;
+      originalImageUrl: string;
+      cloudinaryPublicId: string;
       upKindCd: string;
       orgNm: string;
     };
@@ -151,7 +164,26 @@ async function runSync(
     const chunk = toEmbed.slice(i, i + CHUNK_SIZE);
     const chunkResults = await Promise.all(
       chunk.map(async ({docId, item, imageUrl}) => {
-        const embedding = await getImageEmbedding(extractor, imageUrl);
+        let uploadImageUrl = imageUrl;
+        let cloudinaryPublicId = "";
+
+        if (cloudinaryConfig) {
+          try {
+            const uploadResult = await uploadImageUrlToCloudinary(
+              imageUrl,
+              cloudinaryConfig,
+              docId
+            );
+            uploadImageUrl = uploadResult.secureUrl;
+            cloudinaryPublicId = uploadResult.publicId;
+            cloudinaryUploaded++;
+          } catch (error) {
+            cloudinaryFailed++;
+            logger.warn(`Cloudinary 업로드 실패 (${imageUrl}):`, error);
+          }
+        }
+
+        const embedding = await getImageEmbedding(extractor, uploadImageUrl);
         if (!embedding) return null;
         return {
           id: docId,
@@ -159,7 +191,9 @@ async function runSync(
           metadata: {
             desertionNo: String(item.desertionNo ?? ""),
             careRegNo: String(item.careRegNo ?? ""),
-            imageUrl,
+            imageUrl: uploadImageUrl,
+            originalImageUrl: imageUrl,
+            cloudinaryPublicId,
             upKindCd: String(item.upKindCd ?? ""),
             orgNm: String(item.orgNm ?? ""),
           },
@@ -196,6 +230,7 @@ async function runSync(
     `동기화 완료: API totalCount ${totalCount}건, 1페이지 응답 ${itemList.length}건, ` +
     `Firestore(오늘) ${firestoreWritten}건, ` +
     `유기일 ${todayYmd}·이미지 있음 후보 ${candidates.length}건, ` +
+    `Cloudinary 업로드 성공 ${cloudinaryUploaded}건, 실패 ${cloudinaryFailed}건, ` +
     `Pinecone 임베딩 성공 ${embedded}건, 이미지 실패 ${embedFailed}건`
   );
 }
@@ -208,7 +243,11 @@ export const syncAnimalEmbeddings = onSchedule(
   {
     schedule: "0 17 * * *", // UTC 17:00 = KST 02:00
     timeZone: "Asia/Seoul",
-    secrets: [ANIMALS_OPENAPI_SECRET, PINECONE_API_SECRET],
+    secrets: [
+      ANIMALS_OPENAPI_SECRET,
+      PINECONE_API_SECRET,
+      CLOUDINARY_URL_SECRET,
+    ],
     memory: "2GiB",
     timeoutSeconds: 540,
   },
@@ -226,7 +265,10 @@ export const syncAnimalEmbeddings = onSchedule(
     }
 
     try {
-      await runSync(serviceKey, pineconeApiKey);
+      const cloudinaryConfig = parseCloudinaryUrl(
+        CLOUDINARY_URL_SECRET.value()
+      );
+      await runSync(serviceKey, pineconeApiKey, cloudinaryConfig);
     } catch (error) {
       logger.error("동물 프로필 벡터화 동기화 실패 ㅠㅠ:", error);
       throw error;
