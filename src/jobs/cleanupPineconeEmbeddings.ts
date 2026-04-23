@@ -6,7 +6,7 @@ import {
 } from "../shared/shelterAnimalFirestoreWrite.js";
 import {PINECONE_INDEX_NAME} from "../shared/imageEmbedding.js";
 
-const PINECONE_LIST_PAGE_SIZE = 1000;
+const PINECONE_LIST_PAGE_SIZE = 99;
 const PINECONE_DELETE_BATCH_SIZE = 1000;
 
 export interface CleanupPineconeEmbeddingsOptions {
