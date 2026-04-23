@@ -1,5 +1,4 @@
 import {Pinecone} from "@pinecone-database/pinecone";
-import {pipeline} from "@huggingface/transformers";
 import {
   fetchAbandonmentApiPage,
   normalizeHappenYyyyMmDd,
@@ -7,16 +6,17 @@ import {
   SHELTER_API_PAGE_SIZE,
   todayYyyyMmDdSeoul,
 } from "./shelterAnimalFirestoreWrite.js";
+import {
+  PINECONE_INDEX_NAME,
+  embedImage,
+} from "./imageEmbedding.js";
 import {ShelterAnimalItem} from "./types.js";
 
-/** Pinecone 인덱스 dimension: 384 (DINOv2-small) */
-const PINECONE_INDEX_NAME = "embeded-animal";
 const UPSERT_BATCH_SIZE = 100;
 /** 청크 단위: 한 번에 벡터화할 개수 (공공 API·메모리 부담 완화) */
 const CHUNK_SIZE = 30;
 /** 청크 간 휴식 시간(ms). 공공기관 서버·메모리 안정용 */
 const DELAY_BETWEEN_CHUNKS_MS = 1500;
-const IMAGE_MODEL_ID = "Xenova/dinov2-small";
 
 /**
  * @param {number} ms 대기 시간(ms)
@@ -39,40 +39,6 @@ function getPopfileUrl(item: ShelterAnimalItem): string | null {
   return trimmed.startsWith("http") ? trimmed : null;
 }
 
-/** image-feature-extraction 파이프라인 타입 (pooler 없음 → dims로 CLS 추출) */
-type FeatureExtractor = (
-  url: string,
-  opts?: {pool?: boolean}
-) => Promise<{data: Float32Array; dims?: number[]}>;
-
-/**
- * DINOv2는 pooler 없음 → pool: false 후 CLS(첫 토큰) 추출, L2 정규화로 코사인 유사도 최적화
- * 결과: 384차원 벡터
- * @param {FeatureExtractor} extractor image-feature-extraction pipeline 인스턴스
- * @param {string} imageUrl 프로필 이미지 URL
- */
-async function getImageEmbedding(
-  extractor: FeatureExtractor,
-  imageUrl: string
-): Promise<number[] | null> {
-  try {
-    const result = await extractor(imageUrl, {pool: false});
-    if (!result?.data) return null;
-
-    const data = result.data as Float32Array;
-    const dims = result.dims ?? [];
-    const hiddenDim = dims.length >= 3 ? dims[2] : data.length;
-    const clsVector = data.subarray(0, hiddenDim);
-
-    const arr = Array.from(clsVector);
-    const norm = Math.sqrt(arr.reduce((s, x) => s + x * x, 0)) || 1;
-    return arr.map((x) => x / norm);
-  } catch (error) {
-    console.warn(`이미지 벡터화 실패 (${imageUrl}):`, error);
-    return null;
-  }
-}
-
 /**
  * 메인 동기화: 공공데이터 1페이지(500건) 조회
  * → 오늘 유기분 중 popfile 있는 항목만 이미지 벡터화 후 Pinecone upsert
@@ -93,13 +59,6 @@ export async function runSync(
     SHELTER_API_PAGE_SIZE
   );
   const {itemList, totalCount} = parseShelterItemList(data);
-
-  console.info(
-    "이미지 임베딩 모델 로딩 중… " +
-      `(대상 유기일 happenDt = ${todayYmd}, 1페이지 ${SHELTER_API_PAGE_SIZE}건)`
-  );
-  const pipe = await pipeline("image-feature-extraction", IMAGE_MODEL_ID);
-  const extractor = pipe as unknown as FeatureExtractor;
 
   type Candidate =
     { docId: string; item: ShelterAnimalItem; imageUrl: string };
@@ -135,7 +94,7 @@ export async function runSync(
     const chunk = toEmbed.slice(i, i + CHUNK_SIZE);
     const chunkResults = await Promise.all(
       chunk.map(async ({docId, item, imageUrl}) => {
-        const embedding = await getImageEmbedding(extractor, imageUrl);
+        const embedding = await embedImage(imageUrl);
         if (!embedding) return null;
         return {
           id: docId,

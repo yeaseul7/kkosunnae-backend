@@ -1,18 +1,43 @@
 import express, {Request, Response} from "express";
+import multer from "multer";
 import {
   CloudinaryUploadConfig,
   parseCloudinaryUrl,
+  uploadImageBufferToCloudinary,
   uploadImageUrlToCloudinary,
 } from "../shared/cloudinaryImageUpload.js";
 import {runSync} from "../shared/syncAnimalEmbeddingsCore.js";
 import {
   backfillShelterInfoToFirestore,
 } from "../jobs/backfillShelterInfoToFirestore.js";
+import {cleanupPineconeEmbeddings} from "../jobs/cleanupPineconeEmbeddings.js";
+import {searchSimilarAnimals} from "../jobs/searchSimilarAnimals.js";
 import {syncShelterAnimalsStatus} from "../jobs/syncShelterAnimalsStatus.js";
 
 const app = express();
 const port = Number(process.env.PORT ?? 8080);
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024,
+    files: 1,
+  },
+});
 
+app.use((req: Request, res: Response, next) => {
+  const origin = req.get("origin");
+  res.setHeader("Access-Control-Allow-Origin", origin || "*");
+  res.setHeader("Vary", "Origin");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization");
+
+  if (req.method === "OPTIONS") {
+    res.status(204).send();
+    return;
+  }
+
+  next();
+});
 app.use(express.json());
 
 /**
@@ -107,6 +132,40 @@ app.post("/api/sync/status", async (req: Request, res: Response) => {
   }
 });
 
+app.post("/api/sync/pinecone-cleanup", async (
+  req: Request,
+  res: Response
+) => {
+  if (!verifySchedulerRequest(req, res)) return;
+
+  const pineconeApiKey = process.env.PINECONE_API_KEY;
+  if (!pineconeApiKey) {
+    res.status(500).json({
+      ok: false,
+      error: "PINECONE_API_KEY 환경변수가 설정되지 않았습니다.",
+    });
+    return;
+  }
+
+  const dryRun =
+    req.query.dryRun === "true" ||
+    req.body?.dryRun === true ||
+    req.body?.dryRun === "true";
+
+  try {
+    const result = await cleanupPineconeEmbeddings(
+      getAnimalsOpenApiKey(),
+      pineconeApiKey,
+      {dryRun}
+    );
+    res.status(200).json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("Pinecone stale vector 정리 실패:", error);
+    res.status(500).json({ok: false, error: message});
+  }
+});
+
 app.post("/api/backfill/shelters", async (req: Request, res: Response) => {
   if (!verifySchedulerRequest(req, res)) return;
 
@@ -120,16 +179,26 @@ app.post("/api/backfill/shelters", async (req: Request, res: Response) => {
   }
 });
 
-app.post("/api/images/upload", async (req: Request, res: Response) => {
+app.post("/api/images/upload", upload.single("file"), async (
+  req: Request,
+  res: Response
+) => {
+  const file = req.file;
   const imageUrl = typeof req.body?.imageUrl === "string" ?
     req.body.imageUrl.trim() :
     "";
   const publicId = typeof req.body?.publicId === "string" ?
     req.body.publicId.trim() :
     undefined;
+  const folder = typeof req.body?.folder === "string" ?
+    req.body.folder.trim() :
+    "";
 
-  if (!imageUrl || !imageUrl.startsWith("http")) {
-    res.status(400).json({ok: false, error: "유효한 imageUrl이 필요합니다."});
+  if (!file && (!imageUrl || !imageUrl.startsWith("http"))) {
+    res.status(400).json({
+      ok: false,
+      error: "업로드할 file 또는 유효한 imageUrl이 필요합니다.",
+    });
     return;
   }
 
@@ -143,15 +212,71 @@ app.post("/api/images/upload", async (req: Request, res: Response) => {
       return;
     }
 
-    const uploaded = await uploadImageUrlToCloudinary(
-      imageUrl,
-      cloudinaryConfig,
-      publicId
-    );
-    res.status(200).json({ok: true, image: uploaded});
+    const uploadConfig = {
+      ...cloudinaryConfig,
+      folder: folder || cloudinaryConfig.folder,
+    };
+    const uploaded = file ?
+      await uploadImageBufferToCloudinary(
+        file.buffer,
+        file.originalname,
+        uploadConfig,
+        publicId
+      ) :
+      await uploadImageUrlToCloudinary(imageUrl, uploadConfig, publicId);
+
+    res.status(200).json({
+      ok: true,
+      image: uploaded,
+      url: uploaded.secureUrl,
+      publicId: uploaded.publicId,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error("Cloudinary 이미지 업로드 실패:", error);
+    res.status(500).json({ok: false, error: message});
+  }
+});
+
+app.post("/api/search/animals", upload.single("file"), async (
+  req: Request,
+  res: Response
+) => {
+  const pineconeApiKey = process.env.PINECONE_API_KEY;
+  if (!pineconeApiKey) {
+    res.status(500).json({
+      ok: false,
+      error: "PINECONE_API_KEY 환경변수가 설정되지 않았습니다.",
+    });
+    return;
+  }
+
+  const file = req.file;
+  const imageUrl = typeof req.body?.imageUrl === "string" ?
+    req.body.imageUrl.trim() :
+    "";
+  const requestedTopK = Number(req.body?.topK ?? 10);
+  const topK = Math.min(50, Math.max(1, Math.floor(requestedTopK) || 10));
+
+  if (!file && (!imageUrl || !imageUrl.startsWith("http"))) {
+    res.status(400).json({
+      ok: false,
+      error: "검색할 file 또는 유효한 imageUrl이 필요합니다.",
+    });
+    return;
+  }
+
+  try {
+    const image = file ?
+      new Blob([new Uint8Array(file.buffer)], {
+        type: file.mimetype || "application/octet-stream",
+      }) :
+      imageUrl;
+    const result = await searchSimilarAnimals(image, pineconeApiKey, topK);
+    res.status(200).json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("유사 동물 이미지 검색 실패:", error);
     res.status(500).json({ok: false, error: message});
   }
 });

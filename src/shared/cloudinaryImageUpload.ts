@@ -99,3 +99,62 @@ export async function uploadImageUrlToCloudinary(
     format: result.format,
   };
 }
+
+/**
+ * 업로드된 파일 버퍼를 Cloudinary에 업로드
+ * @param {Buffer} fileBuffer 업로드할 이미지 파일 버퍼
+ * @param {string} originalName 원본 파일명
+ * @param {CloudinaryUploadConfig} config Cloudinary 인증/폴더 설정
+ * @param {string | undefined} publicId 저장할 public_id
+ * @return {Promise<CloudinaryImageUploadResult>} 업로드 결과
+ */
+export async function uploadImageBufferToCloudinary(
+  fileBuffer: Buffer,
+  originalName: string,
+  config: CloudinaryUploadConfig,
+  publicId?: string
+): Promise<CloudinaryImageUploadResult> {
+  cloudinary.config({
+    cloud_name: config.cloudName,
+    api_key: config.apiKey,
+    api_secret: config.apiSecret,
+    secure: true,
+  });
+
+  const safePublicId = publicId ? sanitizeCloudinaryPublicId(publicId) : "";
+  const result = await new Promise<UploadApiResponse>((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        folder: config.folder ?? DEFAULT_FOLDER,
+        public_id: safePublicId || undefined,
+        overwrite: true,
+        resource_type: "image",
+        unique_filename: !safePublicId,
+      },
+      (error, uploaded) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        if (!uploaded) {
+          reject(new Error("Cloudinary upload result is empty."));
+          return;
+        }
+
+        resolve(uploaded);
+      }
+    );
+
+    stream.end(fileBuffer);
+  });
+
+  return {
+    publicId: result.public_id,
+    secureUrl: result.secure_url,
+    originalUrl: originalName,
+    width: result.width,
+    height: result.height,
+    format: result.format,
+  };
+}
