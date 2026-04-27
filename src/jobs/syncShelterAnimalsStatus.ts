@@ -182,6 +182,25 @@ function normalizeAnimalShelterRefs(
 }
 
 /**
+ * 공공데이터 중복 desertion_no/id를 제거
+ * @param {SupabaseAnimalRow[]} rows animals upsert 대상
+ * @return {object} 중복 제거 결과
+ */
+function dedupeAnimalRows(
+  rows: SupabaseAnimalRow[]
+): {rows: SupabaseAnimalRow[]; deduped: number} {
+  const byId = new Map<string, SupabaseAnimalRow>();
+  for (const row of rows) {
+    byId.set(row.id, row);
+  }
+
+  return {
+    rows: [...byId.values()],
+    deduped: rows.length - byId.size,
+  };
+}
+
+/**
  * 유기동물 전체를 Supabase animals 테이블에 upsert
  * @param {ShelterAnimalItem[]} items 유기동물 목록
  * @param {Set<string>} validShelterRegNos 존재하는 보호소 번호 집합
@@ -195,10 +214,11 @@ async function upsertAnimals(
   const mappedRows = items
     .map((item) => mapShelterAnimalToSupabaseRow(item))
     .filter((row): row is SupabaseAnimalRow => Boolean(row));
-  const {rows, nulled} = normalizeAnimalShelterRefs(
+  const {rows: normalizedRows, nulled} = normalizeAnimalShelterRefs(
     mappedRows,
     validShelterRegNos
   );
+  const {rows, deduped} = dedupeAnimalRows(normalizedRows);
 
   let upserted = 0;
   for (let i = 0; i < rows.length; i += SUPABASE_BATCH_SIZE) {
@@ -221,6 +241,9 @@ async function upsertAnimals(
 
   if (nulled > 0) {
     console.info(`animals care_reg_no null 처리: ${nulled}건`);
+  }
+  if (deduped > 0) {
+    console.info(`animals 중복 desertion_no 제거: ${deduped}건`);
   }
 
   return upserted;
