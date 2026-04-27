@@ -11,18 +11,57 @@ export interface SupabaseAnimalRow {
   id: string;
   desertion_no: string;
   care_reg_no: string | null;
+  notice_no: string | null;
+  srvc_txt: string | null;
+  sprt_e_date: string | null;
+  rfid_cd: string | null;
   age: string | null;
   weight: string | null;
   color_cd: string | null;
+  evnt_img: string | null;
+  upd_tm: string | null;
+  end_reason: string | null;
   sex_cd: string | null;
   neuter_yn: string | null;
+  care_nm: string | null;
+  care_tel: string | null;
+  care_addr: string | null;
+  org_nm: string | null;
+  sfe_soci: string | null;
+  sfe_health: string | null;
+  etc_bigo: string | null;
+  up_kind_cd: string | null;
   up_kind_nm: string | null;
+  kind_cd: string | null;
   kind_nm: string | null;
   kind_full_nm: string | null;
-  notice_no: string | null;
+  process_state: string | null;
+  care_owner_nm: string | null;
+  vaccination_chk: string | null;
+  health_chk: string | null;
+  adptn_title: string | null;
+  adptn_s_date: string | null;
+  adptn_e_date: string | null;
+  adptn_condition_limit_txt: string | null;
+  adptn_txt: string | null;
+  adptn_img: string | null;
+  sprt_title: string | null;
+  sprt_s_date: string | null;
+  sprt_condition_limit_txt: string | null;
+  sprt_txt: string | null;
+  sprt_img: string | null;
+  srvc_title: string | null;
+  srvc_s_date: string | null;
+  srvc_e_date: string | null;
+  srvc_condition_limit_txt: string | null;
+  srvc_img: string | null;
+  evnt_title: string | null;
+  evnt_s_date: string | null;
+  evnt_e_date: string | null;
+  evnt_condition_limit_txt: string | null;
+  evnt_txt: string | null;
   notice_sdt: string | null;
   notice_edt: string | null;
-  process_state: string | null;
   happen_dt: string | null;
   happen_place: string | null;
   special_mark: string | null;
@@ -108,6 +147,9 @@ function createDeterministicUuid(value: string): string {
  * @return {string | null} 축종명
  */
 function getUpKindName(item: ShelterAnimalItem): string | null {
+  const upKindName = toNullableTrimmedString(item.upKindNm);
+  if (upKindName) return upKindName;
+
   const kindFullName = toNullableTrimmedString(item.kindCd);
   if (kindFullName?.startsWith("[") && kindFullName.includes("]")) {
     return kindFullName.slice(1, kindFullName.indexOf("]")).trim() || null;
@@ -126,6 +168,9 @@ function getUpKindName(item: ShelterAnimalItem): string | null {
  * @return {string | null} 품종명
  */
 function getKindName(item: ShelterAnimalItem): string | null {
+  const kindName = toNullableTrimmedString(item.kindNm);
+  if (kindName) return kindName;
+
   const kindFullName = toNullableTrimmedString(item.kindCd);
   if (!kindFullName) return null;
   if (kindFullName.startsWith("[") && kindFullName.includes("]")) {
@@ -164,18 +209,63 @@ export function mapShelterAnimalToSupabaseRow(
     id: createDeterministicUuid(desertionNo),
     desertion_no: desertionNo,
     care_reg_no: toNullableTrimmedString(item.careRegNo),
+    notice_no: toNullableTrimmedString(item.noticeNo),
+    srvc_txt: toNullableTrimmedString(item.srvcTxt),
+    sprt_e_date: toNullableTrimmedString(item.sprtEDate),
+    rfid_cd: toNullableTrimmedString(item.rfidCd),
     age: toNullableTrimmedString(item.age),
     weight: toNullableTrimmedString(item.weight),
     color_cd: toNullableTrimmedString(item.colorCd),
+    evnt_img: toNullableTrimmedString(item.evntImg),
+    upd_tm: toNullableTrimmedString(item.updTm),
+    end_reason: toNullableTrimmedString(item.endReason),
     sex_cd: toNullableTrimmedString(item.sexCd),
     neuter_yn: toNullableTrimmedString(item.neuterYn),
+    care_nm: toNullableTrimmedString(item.careNm),
+    care_tel: toNullableTrimmedString(item.careTel),
+    care_addr: toNullableTrimmedString(item.careAddr),
+    org_nm: toNullableTrimmedString(item.orgNm),
+    sfe_soci: toNullableTrimmedString(item.sfeSoci),
+    sfe_health: toNullableTrimmedString(item.sfeHealth),
+    etc_bigo: toNullableTrimmedString(item.etcBigo),
+    up_kind_cd: toNullableTrimmedString(item.upKindCd),
     up_kind_nm: getUpKindName(item),
+    kind_cd: toNullableTrimmedString(item.kindCd),
     kind_nm: getKindName(item),
-    kind_full_nm: toNullableTrimmedString(item.kindCd),
-    notice_no: toNullableTrimmedString(item.noticeNo),
+    kind_full_nm:
+      toNullableTrimmedString(item.kindFullNm) ||
+      toNullableTrimmedString(item.kindCd),
+    process_state: toNullableTrimmedString(item.processState),
+    care_owner_nm: toNullableTrimmedString(item.careOwnerNm),
+    vaccination_chk: toNullableTrimmedString(item.vaccinationChk),
+    health_chk: toNullableTrimmedString(item.healthChk),
+    adptn_title: toNullableTrimmedString(item.adptnTitle),
+    adptn_s_date: toNullableTrimmedString(item.adptnSDate),
+    adptn_e_date: toNullableTrimmedString(item.adptnEDate),
+    adptn_condition_limit_txt:
+      toNullableTrimmedString(item.adptnConditionLimitTxt),
+    adptn_txt: toNullableTrimmedString(item.adptnTxt),
+    adptn_img: toNullableTrimmedString(item.adptnImg),
+    sprt_title: toNullableTrimmedString(item.sprtTitle),
+    sprt_s_date: toNullableTrimmedString(item.sprtSDate),
+    sprt_condition_limit_txt:
+      toNullableTrimmedString(item.sprtConditionLimitTxt),
+    sprt_txt: toNullableTrimmedString(item.sprtTxt),
+    sprt_img: toNullableTrimmedString(item.sprtImg),
+    srvc_title: toNullableTrimmedString(item.srvcTitle),
+    srvc_s_date: toNullableTrimmedString(item.srvcSDate),
+    srvc_e_date: toNullableTrimmedString(item.srvcEDate),
+    srvc_condition_limit_txt:
+      toNullableTrimmedString(item.srvcConditionLimitTxt),
+    srvc_img: toNullableTrimmedString(item.srvcImg),
+    evnt_title: toNullableTrimmedString(item.evntTitle),
+    evnt_s_date: toNullableTrimmedString(item.evntSDate),
+    evnt_e_date: toNullableTrimmedString(item.evntEDate),
+    evnt_condition_limit_txt:
+      toNullableTrimmedString(item.evntConditionLimitTxt),
+    evnt_txt: toNullableTrimmedString(item.evntTxt),
     notice_sdt: toNullableTrimmedString(item.noticeSdt),
     notice_edt: toNullableTrimmedString(item.noticeEdt),
-    process_state: toNullableTrimmedString(item.processState),
     happen_dt: toNullableTrimmedString(item.happenDt),
     happen_place: toNullableTrimmedString(item.happenPlace),
     special_mark: toNullableTrimmedString(item.specialMark),
