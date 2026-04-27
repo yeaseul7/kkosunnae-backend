@@ -29,6 +29,10 @@ interface ExistingAnimalRow {
   neuter_yn: string | null;
 }
 
+interface ExistingShelterRow {
+  care_reg_no: string;
+}
+
 interface CurrentAnimalsSnapshot {
   stateMap: Map<string, {processState: string; neuterYn: string}>;
   itemList: ShelterAnimalItem[];
@@ -120,15 +124,81 @@ async function listExistingAnimals(): Promise<ExistingAnimalRow[]> {
 }
 
 /**
+ * Supabase shelters의 유효한 care_reg_no 목록 조회
+ * @return {Promise<Set<string>>} 유효한 보호소 번호 집합
+ */
+async function listExistingShelterRegNos(): Promise<Set<string>> {
+  const supabase = createSupabaseServerClient();
+  const rows: ExistingShelterRow[] = [];
+  let from = 0;
+  let hasMore = true;
+
+  while (hasMore) {
+    const to = from + SUPABASE_BATCH_SIZE - 1;
+    const {data, error} = await supabase
+      .from("shelters")
+      .select("care_reg_no")
+      .order("care_reg_no", {ascending: true})
+      .range(from, to);
+
+    if (error) {
+      throw new Error(`Supabase shelters 조회 실패 [shelters]: ${error.message}`);
+    }
+
+    const batch = (data ?? []) as ExistingShelterRow[];
+    rows.push(...batch);
+    if (batch.length < SUPABASE_BATCH_SIZE) break;
+    from += SUPABASE_BATCH_SIZE;
+    hasMore = batch.length === SUPABASE_BATCH_SIZE;
+  }
+
+  return new Set(rows.map((row) => normalize(row.care_reg_no)));
+}
+
+/**
+ * animals 외래키 제약에 맞게 care_reg_no 정규화
+ * @param {SupabaseAnimalRow[]} rows animals upsert 대상
+ * @param {Set<string>} validShelterRegNos 존재하는 보호소 번호 집합
+ * @return {{rows: SupabaseAnimalRow[]; nulled: number}} 정규화 결과
+ */
+function normalizeAnimalShelterRefs(
+  rows: SupabaseAnimalRow[],
+  validShelterRegNos: Set<string>
+): {rows: SupabaseAnimalRow[]; nulled: number} {
+  let nulled = 0;
+  const normalizedRows = rows.map((row) => {
+    const careRegNo = normalize(row.care_reg_no);
+    if (!careRegNo || validShelterRegNos.has(careRegNo)) {
+      return row;
+    }
+    nulled++;
+    return {
+      ...row,
+      care_reg_no: null,
+    };
+  });
+
+  return {rows: normalizedRows, nulled};
+}
+
+/**
  * 유기동물 전체를 Supabase animals 테이블에 upsert
  * @param {ShelterAnimalItem[]} items 유기동물 목록
+ * @param {Set<string>} validShelterRegNos 존재하는 보호소 번호 집합
  * @return {Promise<number>} upsert 건수
  */
-async function upsertAnimals(items: ShelterAnimalItem[]): Promise<number> {
+async function upsertAnimals(
+  items: ShelterAnimalItem[],
+  validShelterRegNos: Set<string>
+): Promise<number> {
   const supabase = createSupabaseServerClient();
-  const rows = items
+  const mappedRows = items
     .map((item) => mapShelterAnimalToSupabaseRow(item))
     .filter((row): row is SupabaseAnimalRow => Boolean(row));
+  const {rows, nulled} = normalizeAnimalShelterRefs(
+    mappedRows,
+    validShelterRegNos
+  );
 
   let upserted = 0;
   for (let i = 0; i < rows.length; i += SUPABASE_BATCH_SIZE) {
@@ -147,6 +217,10 @@ async function upsertAnimals(items: ShelterAnimalItem[]): Promise<number> {
       );
     }
     upserted += batch.length;
+  }
+
+  if (nulled > 0) {
+    console.info(`animals care_reg_no null 처리: ${nulled}건`);
   }
 
   return upserted;
@@ -191,6 +265,7 @@ export async function syncShelterAnimalsStatus(
 ): Promise<SyncShelterAnimalsStatusResult> {
   const current = await fetchCurrentAnimalsMap(serviceKey);
   const existingRows = await listExistingAnimals();
+  const validShelterRegNos = await listExistingShelterRegNos();
   const existingMap = new Map(
     existingRows.map((row) => [row.desertion_no, row])
   );
@@ -217,7 +292,7 @@ export async function syncShelterAnimalsStatus(
     .filter((row) => !current.stateMap.has(row.desertion_no))
     .map((row) => row.id);
 
-  const upserted = await upsertAnimals(current.itemList);
+  const upserted = await upsertAnimals(current.itemList, validShelterRegNos);
   const deleted = await deleteStaleAnimals(staleIds);
 
   console.info(
