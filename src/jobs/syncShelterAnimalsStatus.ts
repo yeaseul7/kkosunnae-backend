@@ -2,7 +2,7 @@ import {
   fetchAbandonmentApiPage,
   parseShelterItemList,
   SHELTER_API_PAGE_SIZE,
-} from "../shared/shelterAnimalFirestoreWrite.js";
+} from "../shared/shelterAnimalApi.js";
 import {
   createSupabaseServerClient,
   mapShelterAnimalToSupabaseRow,

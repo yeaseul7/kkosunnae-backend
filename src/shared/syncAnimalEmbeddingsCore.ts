@@ -5,7 +5,7 @@ import {
   parseShelterItemList,
   SHELTER_API_PAGE_SIZE,
   todayYyyyMmDdSeoul,
-} from "./shelterAnimalFirestoreWrite.js";
+} from "./shelterAnimalApi.js";
 import {
   PINECONE_INDEX_NAME,
   embedImage,

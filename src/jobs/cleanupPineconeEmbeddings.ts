@@ -3,7 +3,7 @@ import {
   fetchAbandonmentApiPage,
   parseShelterItemList,
   SHELTER_API_PAGE_SIZE,
-} from "../shared/shelterAnimalFirestoreWrite.js";
+} from "../shared/shelterAnimalApi.js";
 import {PINECONE_INDEX_NAME} from "../shared/imageEmbedding.js";
 
 const PINECONE_LIST_PAGE_SIZE = 99;

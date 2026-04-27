@@ -1,11 +1,10 @@
 import express, {Request, Response} from "express";
 import multer from "multer";
 import {
-  CloudinaryUploadConfig,
-  parseCloudinaryUrl,
-  uploadImageBufferToCloudinary,
-  uploadImageUrlToCloudinary,
-} from "../shared/cloudinaryImageUpload.js";
+  getImageBucketName,
+  uploadImageBufferToSupabaseStorage,
+  uploadImageUrlToSupabaseStorage,
+} from "../shared/supabaseImageUpload.js";
 import {runSync} from "../shared/syncAnimalEmbeddingsCore.js";
 import {
   backfillShelterInfoToSupabase,
@@ -39,20 +38,6 @@ app.use((req: Request, res: Response, next) => {
   next();
 });
 app.use(express.json());
-
-/**
- * Cloud Run 환경변수에서 Cloudinary 설정을 읽음
- * @return {CloudinaryUploadConfig | null} Cloudinary 업로드 설정
- */
-function getCloudinaryConfigFromEnv(): CloudinaryUploadConfig | null {
-  const config = parseCloudinaryUrl(process.env.CLOUDINARY_URL);
-  if (!config) return null;
-
-  return {
-    ...config,
-    folder: process.env.CLOUDINARY_FOLDER || config.folder,
-  };
-}
 
 /**
  * Cloud Scheduler 호출 인증 토큰을 확인
@@ -203,37 +188,26 @@ app.post("/api/images/upload", upload.single("file"), async (
   }
 
   try {
-    const cloudinaryConfig = getCloudinaryConfigFromEnv();
-    if (!cloudinaryConfig) {
-      res.status(500).json({
-        ok: false,
-        error: "CLOUDINARY_URL 환경변수가 설정되지 않았습니다.",
-      });
-      return;
-    }
-
-    const uploadConfig = {
-      ...cloudinaryConfig,
-      folder: folder || cloudinaryConfig.folder,
-    };
     const uploaded = file ?
-      await uploadImageBufferToCloudinary(
+      await uploadImageBufferToSupabaseStorage(
         file.buffer,
         file.originalname,
-        uploadConfig,
+        file.mimetype || "application/octet-stream",
+        folder,
         publicId
       ) :
-      await uploadImageUrlToCloudinary(imageUrl, uploadConfig, publicId);
+      await uploadImageUrlToSupabaseStorage(imageUrl, folder, publicId);
 
     res.status(200).json({
       ok: true,
       image: uploaded,
-      url: uploaded.secureUrl,
-      publicId: uploaded.publicId,
+      url: uploaded.publicUrl,
+      publicId: uploaded.path,
+      bucket: getImageBucketName(),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error("Cloudinary 이미지 업로드 실패:", error);
+    console.error("Supabase Storage 이미지 업로드 실패:", error);
     res.status(500).json({ok: false, error: message});
   }
 });
