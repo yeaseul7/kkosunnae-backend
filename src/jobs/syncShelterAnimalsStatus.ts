@@ -1,26 +1,17 @@
-import {getApps, initializeApp} from "firebase-admin/app";
-import {
-  FieldPath,
-  FieldValue,
-  QueryDocumentSnapshot,
-  getFirestore,
-} from "firebase-admin/firestore";
 import {
   fetchAbandonmentApiPage,
-  mergeShelterAnimalsIntoFirestore,
   parseShelterItemList,
-  SHELTER_ANIMALS_COLLECTION,
   SHELTER_API_PAGE_SIZE,
 } from "../shared/shelterAnimalFirestoreWrite.js";
+import {
+  createSupabaseServerClient,
+  mapShelterAnimalToSupabaseRow,
+  SUPABASE_ANIMALS_CONFLICT_COLUMN,
+  SUPABASE_ANIMALS_TABLE,
+  SUPABASE_BATCH_SIZE,
+  SupabaseAnimalRow,
+} from "../shared/shelterAnimalSupabase.js";
 import {ShelterAnimalItem} from "../shared/types.js";
-
-const FIRESTORE_BATCH_SIZE = 400;
-const FIRESTORE_READ_PAGE_SIZE = 1000;
-
-if (!getApps().length) {
-  initializeApp();
-}
-const firestore = getFirestore();
 
 export interface SyncShelterAnimalsStatusResult {
   ok: true;
@@ -29,6 +20,13 @@ export interface SyncShelterAnimalsStatusResult {
   updated: number;
   deleted: number;
   unchanged: number;
+}
+
+interface ExistingAnimalRow {
+  id: string;
+  desertion_no: string;
+  process_state: string | null;
+  neuter_yn: string | null;
 }
 
 interface CurrentAnimalsSnapshot {
@@ -40,14 +38,14 @@ interface CurrentAnimalsSnapshot {
  * @param {string | undefined} value 원본 문자열
  * @return {string} trim된 문자열
  */
-function normalize(value: string | undefined): string {
+function normalize(value: string | undefined | null): string {
   return String(value ?? "").trim();
 }
 
 /**
  * API 전체 페이지를 순회해 현재 유기동물 상태 맵을 생성
  * @param {string} serviceKey 공공데이터 API 키
- * @return {Promise<object>} docId -> 상태(processState, neuterYn) 맵
+ * @return {Promise<CurrentAnimalsSnapshot>} 현재 유기동물 스냅샷
  */
 async function fetchCurrentAnimalsMap(
   serviceKey: string
@@ -68,11 +66,9 @@ async function fetchCurrentAnimalsMap(
     itemList.push(...pageItems);
 
     for (const item of pageItems) {
-      const desertionNo = normalize(item.desertionNo);
-      const careRegNo = normalize(item.careRegNo);
-      if (!desertionNo || !careRegNo) continue;
-      const docId = `${desertionNo}-${careRegNo}`;
-      stateMap.set(docId, {
+      const mapped = mapShelterAnimalToSupabaseRow(item);
+      if (!mapped) continue;
+      stateMap.set(mapped.desertion_no, {
         processState: normalize(item.processState),
         neuterYn: normalize(item.neuterYn),
       });
@@ -88,82 +84,105 @@ async function fetchCurrentAnimalsMap(
 }
 
 /**
- * shelterAnimals 전체와 API 현재값을 비교해 상태 변경/삭제를 반영
- * @param {object} currentMap API 현재 상태 맵
- * @return {Promise<object>} updated/deleted/unchanged 통계
+ * Supabase animals 기존 상태 전체 조회
+ * @return {Promise<ExistingAnimalRow[]>} 기존 유기동물 행 목록
  */
-async function reconcileShelterAnimals(
-  currentMap: Map<string, {processState: string; neuterYn: string}>
-): Promise<{updated: number; deleted: number; unchanged: number}> {
-  let updated = 0;
-  let deleted = 0;
-  let unchanged = 0;
-  let scanned = 0;
-  let lastDoc: QueryDocumentSnapshot | undefined;
-
+async function listExistingAnimals(): Promise<ExistingAnimalRow[]> {
+  const supabase = createSupabaseServerClient();
+  const rows: ExistingAnimalRow[] = [];
+  let from = 0;
   let hasMore = true;
+
   while (hasMore) {
-    let query = firestore
-      .collection(SHELTER_ANIMALS_COLLECTION)
-      .orderBy(FieldPath.documentId())
-      .limit(FIRESTORE_READ_PAGE_SIZE);
-    if (lastDoc) {
-      query = query.startAfter(lastDoc);
-    }
-    const snap = await query.get();
-    if (snap.empty) {
-      hasMore = false;
-      continue;
-    }
-    const docs = snap.docs;
-    lastDoc = docs[docs.length - 1];
+    const to = from + SUPABASE_BATCH_SIZE - 1;
+    const {data, error} = await supabase
+      .from(SUPABASE_ANIMALS_TABLE)
+      .select("id, desertion_no, process_state, neuter_yn")
+      .order("desertion_no", {ascending: true})
+      .range(from, to);
 
-    for (let i = 0; i < docs.length; i += FIRESTORE_BATCH_SIZE) {
-      const slice = docs.slice(i, i + FIRESTORE_BATCH_SIZE);
-      const batch = firestore.batch();
-      for (const doc of slice) {
-        const apiState = currentMap.get(doc.id);
-        if (!apiState) {
-          batch.delete(doc.ref);
-          deleted++;
-          continue;
-        }
-
-        const data = doc.data() as Record<string, unknown>;
-        const beforeState = normalize(String(data.processState ?? ""));
-        const beforeNeuterYn = normalize(
-          String((data.neuterYn ?? data.neuter_yn ?? "") as string)
-        );
-        const afterState = apiState.processState;
-        const afterNeuterYn = apiState.neuterYn;
-
-        if (beforeState === afterState && beforeNeuterYn === afterNeuterYn) {
-          unchanged++;
-          continue;
-        }
-
-        batch.set(doc.ref, {
-          processState: afterState,
-          neuterYn: afterNeuterYn,
-          neuter_yn: afterNeuterYn,
-          statusUpdatedAt: FieldValue.serverTimestamp(),
-        }, {merge: true});
-        updated++;
-      }
-      await batch.commit();
+    if (error) {
+      throw new Error(
+        `Supabase animals 조회 실패 [${SUPABASE_ANIMALS_TABLE}]: ${error.message}`
+      );
     }
 
-    scanned += docs.length;
-    console.info(
-      `상태 동기화 스캔 진행: ${scanned}건, 업데이트 ${updated}, 삭제 ${deleted}`
-    );
+    const batch = (data ?? []) as ExistingAnimalRow[];
+    rows.push(...batch);
+    console.info(`Supabase animals 조회 진행: 누적 ${rows.length}건`);
+
+    if (batch.length < SUPABASE_BATCH_SIZE) break;
+    from += SUPABASE_BATCH_SIZE;
+    hasMore = batch.length === SUPABASE_BATCH_SIZE;
   }
 
-  return {updated, deleted, unchanged};
+  return rows;
 }
 
 /**
- * shelterAnimals 신규 추가 + 상태/중성화 여부 증분 동기화 + 사라진 문서 삭제
+ * 유기동물 전체를 Supabase animals 테이블에 upsert
+ * @param {ShelterAnimalItem[]} items 유기동물 목록
+ * @return {Promise<number>} upsert 건수
+ */
+async function upsertAnimals(items: ShelterAnimalItem[]): Promise<number> {
+  const supabase = createSupabaseServerClient();
+  const rows = items
+    .map((item) => mapShelterAnimalToSupabaseRow(item))
+    .filter((row): row is SupabaseAnimalRow => Boolean(row));
+
+  let upserted = 0;
+  for (let i = 0; i < rows.length; i += SUPABASE_BATCH_SIZE) {
+    const batch = rows.slice(i, i + SUPABASE_BATCH_SIZE);
+    const {error} = await supabase
+      .from(SUPABASE_ANIMALS_TABLE)
+      .upsert(batch as never[], {
+        onConflict: SUPABASE_ANIMALS_CONFLICT_COLUMN,
+        ignoreDuplicates: false,
+      });
+
+    if (error) {
+      throw new Error(
+        "Supabase animals upsert 실패 " +
+          `[${SUPABASE_ANIMALS_TABLE}]: ${error.message}`
+      );
+    }
+    upserted += batch.length;
+  }
+
+  return upserted;
+}
+
+/**
+ * 현재 API에 없는 Supabase animals 행 삭제
+ * @param {string[]} ids 삭제할 id 목록
+ * @return {Promise<number>} 삭제 건수
+ */
+async function deleteStaleAnimals(ids: string[]): Promise<number> {
+  if (ids.length === 0) return 0;
+
+  const supabase = createSupabaseServerClient();
+  let deleted = 0;
+  for (let i = 0; i < ids.length; i += SUPABASE_BATCH_SIZE) {
+    const batch = ids.slice(i, i + SUPABASE_BATCH_SIZE);
+    const {error} = await supabase
+      .from(SUPABASE_ANIMALS_TABLE)
+      .delete()
+      .in("id", batch);
+
+    if (error) {
+      throw new Error(
+        `Supabase animals 삭제 실패 [${SUPABASE_ANIMALS_TABLE}]: ${error.message}`
+      );
+    }
+    deleted += batch.length;
+    console.info(`Supabase animals 삭제 진행: ${deleted}/${ids.length}`);
+  }
+
+  return deleted;
+}
+
+/**
+ * shelterAnimals 현재 API 기준으로 Supabase animals upsert/delete 동기화
  * @param {string} serviceKey 공공데이터 API 키
  * @return {Promise<SyncShelterAnimalsStatusResult>} 동기화 결과
  */
@@ -171,14 +190,40 @@ export async function syncShelterAnimalsStatus(
   serviceKey: string
 ): Promise<SyncShelterAnimalsStatusResult> {
   const current = await fetchCurrentAnimalsMap(serviceKey);
-  const upserted = await mergeShelterAnimalsIntoFirestore(current.itemList);
-  const {updated, deleted, unchanged} = await reconcileShelterAnimals(
-    current.stateMap
+  const existingRows = await listExistingAnimals();
+  const existingMap = new Map(
+    existingRows.map((row) => [row.desertion_no, row])
   );
+
+  let updated = 0;
+  let unchanged = 0;
+  for (const [desertionNo, apiState] of current.stateMap.entries()) {
+    const existing = existingMap.get(desertionNo);
+    if (!existing) continue;
+
+    const beforeState = normalize(existing.process_state);
+    const beforeNeuterYn = normalize(existing.neuter_yn);
+    if (
+      beforeState === apiState.processState &&
+      beforeNeuterYn === apiState.neuterYn
+    ) {
+      unchanged++;
+      continue;
+    }
+    updated++;
+  }
+
+  const staleIds = existingRows
+    .filter((row) => !current.stateMap.has(row.desertion_no))
+    .map((row) => row.id);
+
+  const upserted = await upsertAnimals(current.itemList);
+  const deleted = await deleteStaleAnimals(staleIds);
+
   console.info(
-    `shelterAnimals 동기화 완료: API ${current.stateMap.size}건, ` +
-      `추가/병합 ${upserted}건, ` +
-      `업데이트 ${updated}건, 삭제 ${deleted}건, 변경없음 ${unchanged}건`
+    `animals 동기화 완료: API ${current.stateMap.size}건, ` +
+      `upsert ${upserted}건, 업데이트 ${updated}건, ` +
+      `삭제 ${deleted}건, 변경없음 ${unchanged}건`
   );
 
   return {

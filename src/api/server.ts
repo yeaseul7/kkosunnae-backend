@@ -8,8 +8,8 @@ import {
 } from "../shared/cloudinaryImageUpload.js";
 import {runSync} from "../shared/syncAnimalEmbeddingsCore.js";
 import {
-  backfillShelterInfoToFirestore,
-} from "../jobs/backfillShelterInfoToFirestore.js";
+  backfillShelterInfoToSupabase,
+} from "../jobs/backfillShelterInfoToSupabase.js";
 import {cleanupPineconeEmbeddings} from "../jobs/cleanupPineconeEmbeddings.js";
 import {searchSimilarAnimals} from "../jobs/searchSimilarAnimals.js";
 import {syncShelterAnimalsStatus} from "../jobs/syncShelterAnimalsStatus.js";
@@ -170,7 +170,7 @@ app.post("/api/backfill/shelters", async (req: Request, res: Response) => {
   if (!verifySchedulerRequest(req, res)) return;
 
   try {
-    const result = await backfillShelterInfoToFirestore(getAnimalsOpenApiKey());
+    const result = await backfillShelterInfoToSupabase(getAnimalsOpenApiKey());
     res.status(200).json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
