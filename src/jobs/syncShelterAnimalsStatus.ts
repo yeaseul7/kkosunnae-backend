@@ -159,7 +159,7 @@ async function listExistingShelterRegNos(): Promise<Set<string>> {
  * animals 외래키 제약에 맞게 care_reg_no 정규화
  * @param {SupabaseAnimalRow[]} rows animals upsert 대상
  * @param {Set<string>} validShelterRegNos 존재하는 보호소 번호 집합
- * @return {{rows: SupabaseAnimalRow[]; nulled: number}} 정규화 결과
+ * @return {object} 정규화 결과
  */
 function normalizeAnimalShelterRefs(
   rows: SupabaseAnimalRow[],
